@@ -10,8 +10,10 @@ moves the camera. Everything up to the power-supply fix was pushed to GitHub on 
 - [x] **Fix the power supply.** Done 2026-10-28: the cause was a poor connector. With a lab supply
       at 8.5 V (2 A limit, the car drew at most 0.8 A) `tools/power_stress.py` passes: no undervoltage,
       throttling or reboot in any stage, including full-speed reversals. Before the fix the same
-      supply at 8.1 V and 8.5 V gave undervoltage as soon as the motors ran. Still to do: run the
-      test again on the car's own battery (`power-stress-test` skill, wheels off the ground).
+      supply at 8.1 V and 8.5 V gave undervoltage as soon as the motors ran.
+- [ ] **Run the power stress test on the car's own batteries** (not done: no batteries at hand on
+      2026-10-28). Use the `power-stress-test` skill with the wheels off the ground and note the
+      cell type and charge. The lab-supply pass says nothing about the batteries.
 - [ ] **Run the safety review** of follow mode from `CODE_REVIEW_PLAN.md` (`/code-review high` or
       `max`, ideally after `/model` to Opus 5.5): watchdog paths in `control.py`, `follower.py`,
       the cancel conditions, the speed cap. It has not been run yet.
