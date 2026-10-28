@@ -11,9 +11,17 @@ moves the camera. Everything up to the power-supply fix was pushed to GitHub on 
       at 8.5 V (2 A limit, the car drew at most 720 mA) `tools/power_stress.py` passes: no undervoltage,
       throttling or reboot in any stage, including full-speed reversals. Before the fix the same
       supply at 8.1 V and 8.5 V gave undervoltage as soon as the motors ran.
-- [ ] **Run the power stress test on the car's own batteries** (not done: no batteries at hand on
-      2026-10-28). Use the `power-stress-test` skill with the wheels off the ground and note the
-      cell type and charge. The lab-supply pass says nothing about the batteries.
+- [ ] **Power supply on the car's own batteries still fails** (tested 2026-10-28, two NCR18650B cells
+      in series, freshly charged at 4.2 V each, wheels off the ground). `tools/power_stress.py`:
+      video, tracker and steady motors (60 %) were clean; full throttle with steering and camera
+      sweeping gave an undervoltage (flags `0x50005`, about 6 s until normalised) and the script
+      stopped the motors. The reversal stage was not reached. The bench supply at 8.5 V passes, so
+      the cause is the cells, their wiring or the board's 5 V rail for the Pi, not the Pi. Options:
+      feed the Pi from its own 5 V source (check first how the board and Pi are connected, two 5 V
+      sources joined together can damage a board), a bulk capacitor at the board input, a motor
+      speed ramp in `control.py` (needs the user's approval), a lower `max_speed`, or checking the
+      holder contacts, lead gauge and cell type. Repeat the test after each change; the car does not
+      drive on the floor on batteries until it passes.
 - [ ] **Run the safety review** of follow mode from `CODE_REVIEW_PLAN.md` (`/code-review high` or
       `max`, ideally after `/model` to Opus 5.5): watchdog paths in `control.py`, `follower.py`,
       the cancel conditions, the speed cap. It has not been run yet.
