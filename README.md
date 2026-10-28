@@ -32,6 +32,14 @@ The server uses the car's stock wiring:
 | Motor speed (left, right) | PCA9685 channels 4, 5 |
 | Motor direction (left, right) | BCM GPIO 17, 27 (TB6612) |
 
+### Power
+
+The board and the Pi were powered from a bench supply at 8.5 V, current limit 2 A. During
+`tools/power_stress.py` (video, tracker, motors, steering, camera and full-speed reversals, wheels
+off the ground) the supply showed a maximum of 720 mA. With the wheels on the floor the motors
+draw more. Check `vcgencmd get_throttled` and `dmesg` for undervoltage; poor connectors alone can
+make the Pi's 5 V rail sag when the motors start.
+
 ## Install
 
 On the Pi, with SSH, I2C support and an internet connection:
@@ -201,6 +209,7 @@ NetworkManager and one onboard plus one USB Wi-Fi interface.
 | `mock_server.py` | Run the real server on a PC with fake hardware and a synthetic camera |
 | `lag_test.py` | Measure control latency, ping loss and the Pi's load while video streams over Wi-Fi |
 | `slow_viewer.py` | Check that the video byte budget shrinks for a slow viewer |
+| `power_stress.py` | Stress the power supply with the motors running (wheels off the ground) and check the Pi's logs for undervoltage |
 | `pi_probe.sh` | Sampler that `lag_test.py --ssh` runs on the Pi |
 | `follow_e2e.py` | Follow mode against the mock server: every way it must end, the speed cap, saved objects |
 | `follow_sim.py` | Check and tune the control law against a simulated car |
