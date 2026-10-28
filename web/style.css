@@ -171,6 +171,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 }
 .pad.active { border-color: var(--accent); }
 
+.padbtn { min-height: 38px; padding: 6px 14px; }
 #center-controls {
   display: grid;
   gap: 14px;

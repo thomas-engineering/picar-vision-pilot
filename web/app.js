@@ -140,7 +140,7 @@ for (const name of ["pan", "tilt"]) {
     link.setDirty({ [name]: parseFloat(sliders[name].value) });
   });
 }
-$("center").onclick = () => link.setDirty({ center_camera: true });
+$("center").onclick = $("center_cam").onclick = () => link.setDirty({ center_camera: true });
 
 $("stop").onclick = () => releaseAll();
 
