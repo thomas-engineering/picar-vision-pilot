@@ -5,9 +5,11 @@
 
 THE MOTORS RUN. Lift the car so the wheels spin freely, keep the power switch within reach and
 ask the user first. Stages, each --secs long, from light to heavy load: video only, video plus
-tracker, then the same with the motors at a steady speed, with the steering and camera sweeping,
-and with fast direction changes (the hardest on a weak supply). While it runs, the Pi's
-throttle flags are sampled; the first live undervoltage stops the motors and ends the test.
+tracker, motors at a steady speed, motors at full throttle, the steering servo alone, the camera
+servos alone, everything together, and fast direction changes (the hardest on a weak supply). While it runs,
+the Pi's throttle flags are sampled; the first live undervoltage stops the motors and ends the
+test, or with --continue-after-failure waits 10 s and runs the remaining stages. --throttle-limit
+scales every throttle like the page's speed slider.
 Afterwards it compares dmesg, the boot id and the picar journal with the state before and
 prints a verdict. Exit status 1 means the supply (or something else) failed a check.
 
@@ -92,14 +94,21 @@ async def drain(ws):
         pass
 
 
-async def drive(ws, stage, secs, abort):
-    """Send the page's continuous message every 30 ms for `secs` seconds."""
+async def drive(ws, stage, secs, abort, limit=1.0):
+    """Send the page's continuous message every 30 ms for `secs` seconds; throttle is scaled by `limit` like the page's speed slider."""
     start = time.monotonic()
     while time.monotonic() - start < secs and not abort.is_set():
         t = time.monotonic() - start
         message = {"steer": 0, "throttle": 0, "pan_rate": 0, "tilt_rate": 0}
         if stage == "steady":
             message["throttle"] = 0.6
+        elif stage == "full":
+            message["throttle"] = 1.0
+        elif stage == "steering":  # servo only: full lock to full lock
+            message["steer"] = 1 if int(t * 0.8) % 2 == 0 else -1
+        elif stage == "camera":  # servos only: pan and tilt at full rate
+            message["pan_rate"] = 1 if int(t * 1.5) % 2 == 0 else -1
+            message["tilt_rate"] = 1 if int(t * 1.1) % 2 == 0 else -1
         elif stage == "sweep":
             message["throttle"] = 1.0
             message["steer"] = 1 if int(t * 0.8) % 2 == 0 else -1
@@ -107,6 +116,7 @@ async def drive(ws, stage, secs, abort):
             message["tilt_rate"] = 1 if int(t * 1.1) % 2 == 0 else -1
         elif stage == "reversals":
             message["throttle"] = 1.0 if int(t * 2) % 2 == 0 else -1.0  # direction change every 0.5 s
+        message["throttle"] *= limit
         await ws.send(json.dumps(message))
         await asyncio.sleep(0.03)
     return time.monotonic() - start
@@ -135,6 +145,7 @@ async def run(args):
     drainer = asyncio.create_task(drain(ws))
     results, failed, failed_link = [], False, False
     stages = [("video only", "idle"), ("video + tracker", "idle"), ("motors steady", "steady"),
+              ("motors full throttle", "full"), ("steering servo only", "steering"), ("camera servos only", "camera"),
               ("motors + steering + camera", "sweep"), ("motor reversals", "reversals")]
     tracker_on = False
     try:
@@ -144,9 +155,9 @@ async def run(args):
                     call(base, "POST", "/api/follow/learn")  # learns whatever is in the reticle
                     tracker_on = True
             sampler.take()
-            print(f"stage: {name} ({args.secs} s)", flush=True)
+            print(f"stage: {name} ({args.secs} s, throttle limit {args.throttle_limit:g})", flush=True)
             try:
-                await drive(ws, kind, args.secs, sampler.live_undervoltage)
+                await drive(ws, kind, args.secs, sampler.live_undervoltage, args.throttle_limit)
                 await ws.send(json.dumps({"steer": 0, "throttle": 0, "pan_rate": 0, "tilt_rate": 0}))
             except websockets.WebSocketException as error:
                 # The server's watchdog has stopped the motors; report it and carry on with a new link.
@@ -160,9 +171,14 @@ async def run(args):
             live = sampler.live_undervoltage.is_set()
             results.append((name, flags, live))
             if live:
-                print("  UNDERVOLTAGE seen live: motors stopped, test ended early")
                 failed = True
-                break
+                if not args.continue_after_failure:
+                    print("  UNDERVOLTAGE seen live: motors stopped, test ended early")
+                    break
+                print("  UNDERVOLTAGE seen live: motors stopped, waiting for the supply to recover")
+                await asyncio.sleep(10)
+                sampler.live_undervoltage.clear()
+                sampler.take()
             await asyncio.sleep(2)  # let the supply recover between stages
     finally:
         try:
@@ -222,6 +238,10 @@ def main():
     parser.add_argument("--host", required=True, help="the Pi's IPv4 address and port, for example 192.168.x.x:8000")
     parser.add_argument("--ssh", default="picar", help="ssh target for the Pi (default: picar)")
     parser.add_argument("--secs", type=int, default=20, help="seconds per stage")
+    parser.add_argument("--throttle-limit", type=float, default=1.0,
+                        help="scale every throttle by this, like the page's speed slider (0.6 = 60 %%)")
+    parser.add_argument("--continue-after-failure", action="store_true",
+                        help="after an undervoltage, wait, then run the remaining stages (to see which loads cause it)")
     parser.add_argument("--wheels-off", action="store_true", required=True,
                         help="confirm the wheels are off the ground and the user agreed to run the motors")
     raise SystemExit(asyncio.run(run(parser.parse_args())))
