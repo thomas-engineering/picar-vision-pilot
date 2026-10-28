@@ -92,6 +92,9 @@ auto exposure and auto white balance cannot be locked. Raw YUYV only, 640x480 at
 
 ## Housekeeping
 
+- [ ] **Push the local commits made after 2026-10-28** (power stress test results, Centre camera
+      button, shutdown link and more; see `git log origin/main..HEAD`). The user wants a reminder at
+      the start of the next session. Run the address/SSID/key-path check first.
 - [x] Pushed on 2026-10-28 after checking the files and history for addresses, SSIDs and key paths.
       Do the same check before each later push, and push only when the user says so.
 - [ ] `tools/lag_test.py` needs the Pi's IPv4 address as `--host`: the name `picar1.fritz.box`
