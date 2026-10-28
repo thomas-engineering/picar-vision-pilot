@@ -9,6 +9,7 @@ import dataclasses
 import json
 import logging
 import os
+import shlex
 import socket
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -58,6 +59,7 @@ async def lifespan(app):
     app.state.camera.on_frame = follower.offer
     app.state.camera.overlay = follower.overlay
     task = asyncio.create_task(app.state.controller.run())
+    app.state.shutting_down = False
     log.info("ready")
     try:
         yield
@@ -73,6 +75,10 @@ app = FastAPI(lifespan=lifespan)
 
 class CameraUpdate(BaseModel):
     max: bool
+
+
+class ShutdownRequest(BaseModel):
+    confirm: bool
 
 
 class ObjectName(BaseModel):
@@ -130,6 +136,25 @@ def camera_info():
         "default_resolution": "%dx%d" % app.state.default_resolution,
         "max_resolution": "%dx%d" % app.state.max_resolution,
     }
+
+
+@app.post("/api/shutdown")
+async def shutdown(request: ShutdownRequest):
+    """Stop the car and power the Pi off; the page asks the user to confirm first."""
+    if not request.confirm:
+        raise HTTPException(422, "Shutdown needs confirm: true")
+    app.state.controller.halt("shutdown")
+    app.state.shutting_down = True  # ignore further commands: nothing may start the car again
+    command = os.environ.get("PICAR_SHUTDOWN_CMD", "sudo -n systemctl poweroff")
+    process = await asyncio.create_subprocess_exec(
+        *shlex.split(command), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+    )
+    if await process.wait() != 0:
+        app.state.shutting_down = False
+        log.error("shutdown command failed: %s", command)
+        raise HTTPException(500, "The Pi did not shut down (the service user needs sudo for systemctl poweroff)")
+    log.info("shutting down: systemd stops this service, which stops the motors")
+    return {"ok": True}
 
 
 @app.get("/api/camera")
@@ -282,6 +307,8 @@ async def control(ws: WebSocket):
             try:
                 msg = json.loads(text)
             except ValueError:
+                continue
+            if app.state.shutting_down:
                 continue
             ctl.command(msg)
             if isinstance(msg, dict) and "follow" in msg:

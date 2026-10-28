@@ -280,6 +280,13 @@ async function followCall(method, path, body) {
     return data;
   } catch { flash("No connection"); return null; }
 }
+$("shutdown").onclick = async e => {
+  e.preventDefault();
+  if (!confirm("Shut down the Raspberry Pi? The car stops and this page goes offline until the car is switched on again.")) return;
+  releaseAll();
+  const done = await followCall("POST", "/api/shutdown", { confirm: true });
+  if (done) { $("settings").close(); flash("Shutting down. Wait until the green LED stops blinking before cutting the power."); renderFollow(); }
+};
 $("learn").onclick = async () => { const f = await followCall("POST", "/api/follow/learn"); if (f) { followState = f; renderFollow(); } };
 $("forget").onclick = async () => { const f = await followCall("DELETE", "/api/follow"); if (f) { followState = f; renderFollow(); } };
 $("follow").onclick = () => link.setDirty({ follow: !followState.following });

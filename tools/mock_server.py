@@ -78,6 +78,7 @@ import server.camera  # noqa: E402
 import server.hardware  # noqa: E402
 
 server.camera.cv2.VideoCapture = FakeCapture
+os.environ["PICAR_SHUTDOWN_CMD"] = "true"  # never power off the development machine
 os.environ.setdefault("PICAR_OBJECTS", os.path.join(tempfile.gettempdir(), "picar_mock_objects"))
 calibration = os.path.join(tempfile.gettempdir(), "picar_mock_calibration.json")
 # CALIBRATION_PATH is bound as a default argument, so the defaults are patched.

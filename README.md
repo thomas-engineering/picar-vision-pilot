@@ -140,6 +140,7 @@ Environment variables of the server (set them in `deploy/picar.service` with `En
 | `PICAR_RESOLUTION` | `320x240` | Default stream size |
 | `PICAR_MAX_RESOLUTION` | `640x480` | Size used by the "max resolution" setting |
 | `PICAR_QUALITY` | `55` | JPEG quality |
+| `PICAR_SHUTDOWN_CMD` | `sudo -n systemctl poweroff` | Command run by `POST /api/shutdown`; the service user needs passwordless sudo for it (the default Pi OS user has it) |
 
 The server listens on port 8000 (`python -m server.run [port]`) on IPv4 and IPv6.
 
@@ -184,6 +185,7 @@ whenever the camera moves, and `{"type": "follow", ...}` with the follow state w
 | `GET`, `POST /api/camera` | `{"max": true}` switches to the maximum resolution (not saved across restarts) |
 | `GET`, `POST /api/calibration` | Read and change calibration values; changes are saved |
 | `GET /api/follow`, `POST /api/follow/learn`, `DELETE /api/follow` | Follow state; learn what is in the reticle; forget it |
+| `POST /api/shutdown` | `{"confirm": true}` stops the car, ignores further commands and powers the Pi off (the page asks the user first). Like the rest of the API it has no authentication |
 | `GET`, `POST /api/objects`, `POST /api/objects/NAME/load`, `DELETE /api/objects/NAME`, `GET /api/objects/NAME/thumbnail` | Saved objects |
 
 ## Wi-Fi

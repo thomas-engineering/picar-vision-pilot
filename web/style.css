@@ -258,6 +258,7 @@ dialog::backdrop { background: #000a; }
 .toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
 .stats { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin: 0; }
 a { color: var(--accent); }
+a.danger { color: var(--bad); }
 #objects { display: grid; gap: 8px; }
 .object { display: grid; grid-template-columns: 44px 1fr auto auto; align-items: center; gap: 8px; }
 .object img { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; background: #000; }

@@ -267,6 +267,15 @@ async def main():
         check("delete an object", code == 200 and listing == [], "%s %s" % (code, listing))
         code, _ = await call("DELETE", "/api/objects/orange%20ball")
         check("deleting it again gives 404", code == 404, str(code))
+        code, _ = await call("POST", "/api/shutdown", {"confirm": False})
+        check("shutdown needs confirmation", code == 422, str(code))
+        await page.send({"throttle": 0.5})
+        await asyncio.sleep(0.1)
+        code, _ = await call("POST", "/api/shutdown", {"confirm": True})
+        await page.send({"throttle": 0.5})
+        await asyncio.sleep(0.4)
+        check("shutdown stops the car and ignores later commands", code == 200 and (await status())["throttle"] == 0,
+              "%s, throttle %s" % (code, (await status())["throttle"]))
         await page.close()
         viewer.close()
     finally:
