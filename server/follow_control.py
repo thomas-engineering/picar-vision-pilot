@@ -21,11 +21,12 @@ class Command:
 
 
 class FollowControl:
-    # Camera geometry. The field of view is a guess for the webcam and only scales the bearing.
-    HALF_FOV = 27.0  # degrees from the image centre to its left and right edge (a guess, not measured)
+    # Camera geometry. Measured on the car (2026-11-05): panning by 10 to 30 servo degrees shifts the
+    # 320 px picture by 5.2 px per degree in both directions, so the half width is about 31 degrees.
+    HALF_FOV = 30.6  # servo degrees from the image centre to its left and right edge
     # Directions follow the page's stick convention (web/app.js): the camera looks right when the pan
     # angle falls, and up when the tilt angle rises. Checked on the car (camera only): the camera turns
-    # toward the object. HALF_FOV is still a guess; it only scales how far the steering turns.
+    # toward the object.
     PAN_SIGN = -1.0
     TILT_SIGN = -1.0
 
@@ -44,6 +45,8 @@ class FollowControl:
     MAX_ACCEL = 1.5  # throttle per second
     SLOW_BEARING = 60.0  # degrees; the speed is reduced when the target is far to the side
     SIZE_SMOOTHING = 0.4
+    SIZE_JUMP = 0.25  # a size this far off the smoothed one in one step (a hand over part of it, a wrong box)
+    # is not trusted to speed up on: the throttle may then fall but not rise
 
     MIN_CONFIDENCE = 0.35
     MAX_FRAME_AGE = 0.25  # seconds; older frames stop the car
@@ -115,8 +118,9 @@ class FollowControl:
         self._steer += self.STEER_SMOOTHING * (steer - self._steer)
         command.steer = self._steer
 
+        jumped = self._size is not None and abs(track.size / max(self._size, 0.05) - 1) > self.SIZE_JUMP
         self._size = track.size if self._size is None else self._size + self.SIZE_SMOOTHING * (track.size - self._size)
-        command.throttle = self._speed(1 / max(self._size, 0.05) - 1, bearing, now, dt)
+        command.throttle = self._speed(1 / max(self._size, 0.05) - 1, bearing, now, dt, jumped)
         return command
 
     def _camera_rate(self, error, gain):
@@ -124,8 +128,10 @@ class FollowControl:
             return 0.0
         return _clip(gain * error, -1.0, 1.0)
 
-    def _speed(self, excess, bearing, now, dt):
-        """Throttle from how much farther the target is than at learn time (a ratio, 0 is equal)."""
+    def _speed(self, excess, bearing, now, dt, hold=False):
+        """Throttle from how much farther the target is than at learn time (a ratio, 0 is equal).
+
+        With hold, the throttle does not rise in this step."""
         if now - self._good_since < self.REACQUIRE_HOLD:
             target = 0.0
             self._moving = False
@@ -141,6 +147,8 @@ class FollowControl:
                                self.MIN_MOVE, self.max_throttle)
         if target <= 0:
             self._throttle = 0.0
+        elif hold:
+            self._throttle = min(target, self._throttle)
         else:
             self._throttle = max(self.MIN_MOVE, min(target, self._throttle + self.MAX_ACCEL * dt))
         return self._throttle

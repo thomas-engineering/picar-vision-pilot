@@ -106,9 +106,10 @@ Follow mode ends, and the car stops, when:
 Two kinds of objects:
 
 - **With colour** (at least half of the learn box is colourful, and most of those colours are rare
-  around it): judged by hue alone, so changes of light, exposure and how the object is held do not
-  upset it; the car notices when the tracker has drifted onto something else, and finds the object
-  again after it was hidden. It only takes a candidate for the object if hue, edge shape and size
+  around it): judged by hue, so changes of light, exposure and how the object is held do not
+  upset it, and by how colourful it is for its brightness, so skin (nearly the hue of a red object, but
+  much duller) is not taken for it; the car notices when the tracker has drifted onto something else, and finds the object
+  again after it was hidden. It only takes a candidate for the object if hue, colourfulness, brightness, edge shape and size
   all fit, so a look-alike of the same colour is passed over: if in doubt it keeps searching. A
   coloured object can be saved by name in Settings and loaded later; the car then looks for it.
 - **Without colour** (a plain grey object, or one whose colours are common around it): followed while
@@ -122,6 +123,9 @@ Setup on the Pi: `deploy/fetch_models.sh` downloads the NanoTrack model files in
 `PICAR_TRACKER_THREADS` the number of OpenCV threads (default 3). Follow mode starts in
 camera-only mode: the camera follows the object, and the car neither steers nor drives, until
 `PICAR_FOLLOW_DRIVE=1` is set for the service. Check first that the camera turns toward the object.
+To keep it across reboots, put it in a drop-in, `/etc/systemd/system/picar.service.d/follow-drive.conf`
+(`[Service]` and `Environment=PICAR_FOLLOW_DRIVE=1`), then `sudo systemctl daemon-reload` and restart
+`picar`; delete the file the same way to go back to camera-only.
 
 ### Calibration
 

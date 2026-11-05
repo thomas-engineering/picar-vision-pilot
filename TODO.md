@@ -48,17 +48,19 @@ moves the camera. Everything up to the power-supply fix was pushed to GitHub on 
 - [ ] Tune on the floor: `KP_SPEED`, `START_EXCESS`, `STOP_EXCESS`, `KP_PAN`, `STEER_FULL` in
       `server/follow_control.py`, and `SPEED_CAP_DUTY` (30 %) in `server/follower.py`. Re-check
       with `tools/follow_sim.py` and `tools/follow_e2e.py`.
-- [ ] **Measure the camera's field of view** (`HALF_FOV`, now a guess of 27 degrees): it scales how
-      far the steering turns. Mark two points a known distance apart at a known range.
+- [x] **Measure the camera's field of view**: 5.2 px per servo degree at 320 px, `HALF_FOV` 30.6
+      (2026-11-05, by panning the camera and matching features between the pictures).
 
 ## Rework (found in real tests)
 
-- [ ] **The camera locks onto a very different object when the learned one is hidden** (reported
-      as "my throat", so probably skin). Reproduce it, read the Pi's log
-      (`journalctl -u picar | grep -i "tracker\|searching"`, the `searching:` lines say why
-      candidates were turned down), record a clip with `tools/record_clip.py`, and add it to
-      `tools/object_test.py`. Suspects: the loose hue gate in `ObjectTracker._search` (skin is
-      near red and orange), the size gate, or NanoTrack drifting while the drift check stays quiet.
+- [ ] **Skin taken for the red disc** (2026-11-05: the camera followed the hand that covered the
+      disc, and the search locked onto the neck). Reproduced with `clips/disc-skin`, where the shadowed
+      ear and cheek were taken for the disc. Fixed in the tracker and covered by `tools/object_test.py`
+      (`clips/disc-neck`, `clips/disc-skin`, both local only): a colourfulness check against the hand,
+      a re-detection hue limit that follows how far the disc's own hue strayed, and a brightness gate.
+      Still to confirm on the car.
+- [ ] **The search misses the disc in a much darker picture** (`clips/disc-skin` with gamma 1.5: found
+      only at frame 610): its coloured area looks smaller there and fails the size gate.
 - [ ] **Test objects without colour that have texture** (a grey object with a logo or edges):
       record a clip, see whether the "track-only" tier holds up or whether it needs more cues.
 - [ ] **Try saving and loading an object on the real page** (Settings, "Saved objects"). Only

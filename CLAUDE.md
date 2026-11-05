@@ -23,7 +23,13 @@ vanilla-JS page in `web/` (no build step, no framework). See README.md for the f
 ## Safety rules
 - The car must stop when commands stop (0.3 s watchdog in `control.py`) and when the page loses
   focus. Never remove or loosen this without asking.
-- Motors keep their last PWM value if the process is killed hard. Stop the service normally.
+- The PWM chip keeps the motors' last duty if the process dies; the service's `ExecStopPost`
+  (`server/motors_off.py`) switches them off about 0.4 s after a crash or kill -9. Still stop the service
+  normally, and keep that hook when changing `deploy/picar.service`. A reset of the Pi itself (crash,
+  watchdog, undervoltage) is not covered: the chip keeps its power, and the wheels kept turning for about
+  55 s until the server was up again (tested 2026-11-05). The fix is hardware still to be added (a relay
+  in the motor driver's 5V wire, switched by BCM 20 with a 10 kOhm pull-down). Until then the user allows
+  floor tests only while watched, with the car easy to lift (decided 2026-11-05).
 - No authentication exists. Do not expose the server beyond the local network.
 - Keep the wheels off the ground for any motor test, and ask before running motors.
 - Follow mode must end, and the car must stop, whenever its tracker results or the page's messages
@@ -33,7 +39,9 @@ vanilla-JS page in `web/` (no build step, no framework). See README.md for the f
 - Follow mode drives only with `PICAR_FOLLOW_DRIVE=1` set for the service; by default only the camera
   follows. The camera directions and, with the wheels off the ground, the steering direction, forward
   drive, speed and stop checks were verified on the car; driving on the floor was not. Ask before
-  enabling driving, and keep the wheels off the ground until the floor test is agreed.
+  enabling driving. Since 2026-11-05 the user has it on permanently on the Pi (drop-in
+  `/etc/systemd/system/picar.service.d/follow-drive.conf`, see README); the floor test is agreed but not
+  done yet, watched only (see the reset rule above).
 
 ## Conventions
 - Match the existing style: short docstrings, comments only for the why, no new dependencies

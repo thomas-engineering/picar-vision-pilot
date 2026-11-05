@@ -5,7 +5,11 @@
 
 The expected positions were read off the frames by eye. clips/bright-ball is a red disc that is
 fully hidden by a hand at frames 234-258 while a second red object sits at the left edge;
-clips/grey-box is a small plain grey cube that a second hand covers at frames 63-68. Exit status 1 means a check failed.
+clips/grey-box is a small plain grey cube that a second hand covers at frames 63-68; clips/disc-neck (checked
+only if present) is the red disc held in front of a neck and face, near and far, until two hands cover it
+from frame 540 to the end; clips/disc-skin (also optional) is the disc covered by a hand at about frame 320,
+then gone while face, ear and neck come close to the camera (the shadowed ear was once taken for it), and
+back in front of the neck from frame 547. Exit status 1 means a check failed.
 """
 import glob
 import os
@@ -17,7 +21,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from server.follow import ObjectTracker  # noqa: E402
+from server.follow import ObjectTracker, reticle_box  # noqa: E402
 
 DISC_START = (168, 96, 32, 29)
 CUBE_START = (202, 88, 19, 25)
@@ -140,7 +144,8 @@ def main():
         check("disc back %.1fx the size: found, and on the disc" % factor, back is not None and back <= 300 and len(on_disc) == 4,
               "found again at %s, on the disc at %d of 4 checkpoints" % (back, len(on_disc)))
 
-    # The same clips in other light: no false alarm, and the hand is still noticed.
+    # The same clips in other light: no false alarm, and the hand is still noticed within a few frames. In
+    # cool light the hand's hue alone passed as the disc, and the camera followed the hand until frame 258.
     for kind in ("gain0.6", "gain1.6", "warm", "cool", "gamma0.7", "gamma1.5", "sat"):
         tracker = ObjectTracker(models)
         tracker.learn(perturb(ball[0], kind), DISC_START)
@@ -148,7 +153,7 @@ def main():
         lost = next((i for i, t in enumerate(tracks) if t.state == "lost"), None)
         back = next((i for i, t in enumerate(tracks) if lost is not None and i > lost and t.state == "tracking"), None)
         check("%s: red disc is judged by hue, not brightness" % kind,
-              tracker.tier == "colour" and lost is not None and 232 <= lost <= 265 and back is not None and back <= 300
+              tracker.tier == "colour" and lost is not None and 232 <= lost <= 245 and back is not None and back <= 300
               and near(tracks[362], DISC_AT[362]),
               "lost at %s, found again at %s" % (lost, back))
         tracker = ObjectTracker(models)
@@ -158,6 +163,47 @@ def main():
         check("%s: grey cube is not mistaken for a coloured one" % kind,
               tracker.tier == "track-only" and lost is not None and 64 <= lost <= 80,
               "%s, lost at %s" % (tracker.tier, lost))
+
+    # The disc in front of skin: held all the time, the covering hands noticed, and neither the hands nor
+    # the neck taken for the disc afterwards.
+    neck = load("disc-neck")
+    if neck:
+        tracker = ObjectTracker(models)
+        tracker.learn(neck[0], reticle_box(neck[0].shape[1], neck[0].shape[0]))
+        tracks = [tracker.update(f) for f in neck]
+        lost = next((i for i, t in enumerate(tracks) if t.state == "lost"), None)
+        check("disc at the neck: held until the hands come", lost is not None and lost >= 536, "first loss at frame %s" % lost)
+        check("disc at the neck: the covering hands are noticed", lost is not None and lost <= 548, "lost at frame %s" % lost)
+        check("disc at the neck: no skin taken for it afterwards",
+              lost is not None and not any(t.state == "tracking" for t in tracks[lost:]),
+              "%d frames tracking after the loss" % sum(t.state == "tracking" for t in tracks[lost:]) if lost is not None else "")
+    else:
+        print("SKIP disc at the neck: clips/disc-neck is missing")
+
+    skin = load("disc-skin")
+    if skin:
+        tracker = ObjectTracker(models)
+        tracker.learn(skin[0], reticle_box(skin[0].shape[1], skin[0].shape[0]))
+        tracks = [tracker.update(f) for f in skin]
+        lost = next((i for i, t in enumerate(tracks) if t.state == "lost"), None)
+        check("disc gone, face close: hand over the disc noticed", lost is not None and 312 <= lost <= 336,
+              "first loss at frame %s" % lost)
+        wrong = sum(t.state == "tracking" for t in tracks[lost:540]) if lost is not None else -1
+        check("disc gone, face close: no skin taken for it", wrong == 0, "%d frames tracking while the disc was away" % wrong)
+        back = next((i for i, t in enumerate(tracks) if i >= 540 and t.state == "tracking"), None)
+        held = sum(t.state == "tracking" for t in tracks[560:]) / len(tracks[560:])
+        check("disc gone, face close: found again in front of the neck", back is not None and back <= 560 and held >= 0.9,
+              "found at frame %s, held %.0f %% after frame 560" % (back, 100 * held))
+        # In other light too: in cool light the shadowed ear passed the hue limit and was only turned down as too dark.
+        for kind in ("gain0.6", "gain1.6", "warm", "cool", "gamma0.7", "gamma1.5", "sat"):
+            frames = [perturb(f, kind) for f in skin]
+            tracker = ObjectTracker(models)
+            tracker.learn(frames[0], reticle_box(skin[0].shape[1], skin[0].shape[0]))
+            tracks = [tracker.update(f) for f in frames]
+            wrong = sum(t.state == "tracking" for t in tracks[340:540])
+            check("%s: no skin taken for the disc" % kind, wrong == 0, "%d frames tracking while the disc was away" % wrong)
+    else:
+        print("SKIP disc gone, face close: clips/disc-skin is missing")
 
     print("PASS" if all(RESULTS) else "FAIL")
     return 0 if all(RESULTS) else 1

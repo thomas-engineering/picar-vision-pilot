@@ -37,7 +37,23 @@ VERIFY_GOOD, VERIFY_BAD = 0.20, 0.50  # hue distance: fully trusted below, no co
 DRIFT_DIST = 0.45  # hue distance above which the box no longer shows the learned object
 DRIFT_FRAMES = 3  # frames in a row beyond the limit before the object counts as lost
 NANO_MIN_SCORE = 0.3
-REDETECT_HUE = 0.40  # a blob must be this close in hue to be the object again
+REDETECT_HUE = 0.40  # a blob must be this close in hue to be the object again, at most
+# and, once the object has been tracked well for a while, no farther in hue than it strayed itself then
+# (95th percentile) plus this margin, but never stricter than the floor. In clips/disc-skin the disc stayed
+# at 0.20 and below, and the ear and cheek in shadow, taken for it with the fixed limit, started at 0.28.
+REDETECT_HUE_MARGIN = 0.08
+REDETECT_HUE_FLOOR = 0.20
+# A candidate's colourful pixels may also be at most this factor darker (median) than the darkest the object
+# was while tracked well: in cool light the shadowed ear passed the hue limit, but it was at about 100 where
+# the disc never went below 156. Like the size, this is relative to what was seen, so it follows the light.
+REDETECT_DARKER = 1.35
+# Skin has nearly the hue of a red or orange object (a hand over the red disc scored 0.39 in cool light,
+# under both limits above), but it is much duller for its brightness. So a box or blob also has to be
+# at least this share as colourful (chroma over luma) as the object was at Learn. In clips/disc-neck the
+# disc went down to 0.59 (small and far away in front of a bright wall) and the covering hands stayed at
+# 0.54 and below; in the changed-light copies of clips/bright-ball the hand stayed below 0.6 except when
+# overexposed.
+MIN_CHROMA = 0.55
 REDETECT_SIZE = 1.25  # and at most this factor taller or shorter than any height it had while it was tracked well
 # While the object is tracked well, the tracker remembers views of it (shapes and heights) and the other
 # blobs of the same colour in the picture, which are not the object. A candidate after a loss has to look
@@ -58,7 +74,7 @@ REDETECT_FRAMES = 3  # frames in a row the same blob must be found before tracki
 SETTLE_FRAMES = 20
 BASELINE_FRAMES = 20
 SHAPE_FLOOR, SHAPE_CEIL, SHAPE_MARGIN = 0.25, 0.30, 0.08  # a wrong object scores 0.33 or more
-PROFILE_VERSION = 2  # of the saved form of an object
+PROFILE_VERSION = 3  # of the saved form of an object
 MIN_BOX = 8
 RETICLE = 0.3  # side of the learn box as a share of the image height
 NANO_MODELS = ("nanotrack_backbone_sim.onnx", "nanotrack_head_sim.onnx")
@@ -69,7 +85,7 @@ class Track:
     state: str  # "idle", "tracking" or "lost"
     box: tuple | None = None  # x, y, w, h in pixels
     confidence: float = 0.0  # 0..1, how well the box matches the learned colours
-    size: float = 0.0  # box height relative to the height at learn time
+    size: float = 0.0  # longer side of the box relative to that at learn time (ColorTracker: the height)
     reason: str = ""  # why the object is lost: "drift", "searching", "confirming", "ambiguous", "track-only" or "lost"
 
 
@@ -264,6 +280,30 @@ def _hue_hist(frame, box):
     return (hist / (hist.sum() + 1e-6)).astype(np.float32)
 
 
+def _chroma(frame, box):
+    """How colourful the colourful pixels of the box are for their brightness (median chroma over luma)."""
+    patch = _patch(frame, box)
+    if patch is None:
+        return 0.0
+    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    mask = (hsv[..., 1] >= MIN_SATURATION) & (hsv[..., 2] >= MIN_VALUE)
+    if not mask.any():
+        return 0.0
+    ycc = cv2.cvtColor(patch, cv2.COLOR_BGR2YCrCb).astype(np.float32)
+    chroma = np.hypot(ycc[..., 1] - 128, ycc[..., 2] - 128) / np.maximum(ycc[..., 0], 16)
+    return float(np.median(chroma[mask]))
+
+
+def _value(frame, box):
+    """Median brightness (HSV value) of the colourful pixels in the box."""
+    patch = _patch(frame, box)
+    if patch is None:
+        return 0.0
+    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    mask = (hsv[..., 1] >= MIN_SATURATION) & (hsv[..., 2] >= MIN_VALUE)
+    return float(np.median(hsv[..., 2][mask])) if mask.any() else 0.0
+
+
 def _shape_hist(frame, box):
     """Directions of the edges in the box, weighted by their strength."""
     patch = _patch(frame, box)
@@ -308,17 +348,22 @@ class ObjectTracker:
         self._reference = None  # hue histogram (colour) or edge-direction histogram (track-only) of the object
         self._shape = None  # edge-direction histogram at Learn, to tell look-alikes of the same colour apart
         self._look = None  # colour/brightness histogram, only to choose between candidates
+        self._chroma = None  # how colourful the object was at Learn (colour tier)
         self._baseline = []  # distances during the second after the settling (track-only)
         self._limit = SHAPE_FLOOR
         self._frames = 0  # tracked frames since Learn
         self._ref_height = None
         self._heights = collections.deque(maxlen=150)  # box heights of the last frames that matched well
+        self._hues = collections.deque(maxlen=300)  # hue distances of the last frames that matched well
+        self._values = collections.deque(maxlen=150)  # median brightness of the colourful pixels in those frames
         self._exemplars = collections.deque(maxlen=EXEMPLARS)  # edge-direction histograms of views while tracked well
         self._impostors = collections.deque(maxlen=IMPOSTORS)  # edge-direction histograms of same-coloured other blobs
         self._pending = collections.deque()  # (good frame, kind, value) seen but not yet certain
         self._good = 0  # frames that matched well since Learn
         self.search_info = ""  # why candidates were turned down, for the log
         self._height_rel = None  # reference height as a share of the frame height, for saved objects
+        self._side_rel = None  # the same for the longer side of the box
+        self._ref_side = None
         self._bad = self._drift = self._seen = 0
         self._candidate = None
 
@@ -367,11 +412,18 @@ class ObjectTracker:
             self.colour._ref_height = float(box[3])
         self._ref_height = float(box[3])
         self._height_rel = self._ref_height / height
+        # The size that sets the speed comes from the longer side: a disc turned away from the camera gets
+        # narrower or flatter, but its longer side stays, so it does not look farther away than it is.
+        self._ref_side = float(max(box[2], box[3]))
+        self._side_rel = self._ref_side / height
         self._reference = _hue_hist(frame, box) if coloured else _shape_hist(frame, box)
         self._look = _look_hist(frame, box)
         self._shape = _shape_hist(frame, box)
+        self._chroma = _chroma(frame, box) if coloured else None
         self._baseline, self._limit, self._frames = [], SHAPE_FLOOR, 0
         self._heights.clear()
+        self._hues.clear()
+        self._values.clear()
         self._exemplars.clear()
         self._impostors.clear()
         self._pending.clear()
@@ -384,7 +436,8 @@ class ObjectTracker:
         if self.tier != "colour":
             raise ValueError("only objects with colour can be saved")
         return {"version": PROFILE_VERSION, "hist": self.colour._hist, "ref_fill": self.colour._ref_fill,
-                "hue": self._reference, "look": self._look, "shape": self._shape, "height_rel": self._height_rel}
+                "hue": self._reference, "look": self._look, "shape": self._shape, "chroma": self._chroma,
+                "height_rel": self._height_rel, "side_rel": self._side_rel}
 
     def load(self, profile):
         """Use a saved object; the tracker starts out lost and finds the object by its colours."""
@@ -393,7 +446,9 @@ class ObjectTracker:
         self.reset()
         self.tier = "colour"
         self._reference, self._look, self._shape = profile["hue"], profile["look"], profile["shape"]
+        self._chroma = float(profile["chroma"])
         self._height_rel = float(profile["height_rel"])
+        self._side_rel = float(profile["side_rel"])
         self.colour.restore(profile["hist"], float(profile["ref_fill"]), 1.0)
         self._lose("searching")
 
@@ -403,8 +458,13 @@ class ObjectTracker:
             return Track("idle")
         if self._ref_height is None:  # a loaded object: the size follows from the frame size
             self._ref_height = self._height_rel * frame.shape[0]
+            self._ref_side = self._side_rel * frame.shape[0]
             self.colour._ref_height = self._ref_height
         return self._track(frame) if self.state == "tracking" else self._search(frame)
+
+    def _size(self, box):
+        """Longer side of the box relative to that at learn time: what the speed is set from."""
+        return max(box[2], box[3]) / self._ref_side
 
     def _lose(self, reason):
         self.state, self.reason = "lost", reason
@@ -424,12 +484,12 @@ class ObjectTracker:
             self._bad += 1
             if self._bad >= LOST_AFTER:
                 return self._lose("lost")
-            return Track("tracking", self._box, 0.0, self._box[3] / self._ref_height)
+            return Track("tracking", self._box, 0.0, self._size(self._box))
         self._bad = 0
         self._box = box
         if self.tier == "colour":
             distance = _distance(self._reference, _hue_hist(frame, box))
-            drifting = distance > DRIFT_DIST
+            drifting = distance > DRIFT_DIST or self._dull(frame, box)
             match = min(1.0, max(0.0, (VERIFY_BAD - distance) / (VERIFY_BAD - VERIFY_GOOD)))
         else:
             drifting, match = self._check_plain(frame, box)
@@ -437,15 +497,21 @@ class ObjectTracker:
         if self._drift >= DRIFT_FRAMES:
             return self._lose("drift")
         if match > 0.8 and self.tier == "colour":
-            self._remember(frame, box)
+            self._remember(frame, box, distance)
         elif match <= 0.5:
             self._pending.clear()  # whatever was seen just before may already have been wrong
-        return Track("tracking", box, min(score, 1.0) * match, box[3] / self._ref_height)
+        return Track("tracking", box, min(score, 1.0) * match, self._size(box))
 
-    def _remember(self, frame, box):
+    def _dull(self, frame, box):
+        """Much less colourful than the object at Learn, such as skin in place of a red object."""
+        return _chroma(frame, box) < MIN_CHROMA * self._chroma
+
+    def _remember(self, frame, box, hue):
         """Learn from a frame in which the object is certainly in the box: its looks, and the impostors around."""
         self._good += 1
         self._pending.append((self._good, "height", box[3]))
+        self._pending.append((self._good, "hue", hue))
+        self._pending.append((self._good, "value", _value(frame, box)))
         if self._good % EXEMPLAR_EVERY == 0:
             self._pending.append((self._good, "view", _shape_hist(frame, box)))
         if self._good % IMPOSTOR_EVERY == 0:
@@ -456,6 +522,10 @@ class ObjectTracker:
             _, kind, value = self._pending.popleft()
             if kind == "height":
                 self._heights.append(value)
+            elif kind == "hue":
+                self._hues.append(value)
+            elif kind == "value":
+                self._values.append(value)
             elif kind == "view":
                 self._exemplars.append(value)
             elif all(_distance(value, other) > 0.05 for other in self._impostors):
@@ -481,7 +551,7 @@ class ObjectTracker:
         """Lost: for an object with colour, look for it in the whole frame."""
         if self.tier != "colour":
             return Track("lost", reason="track-only")
-        # Candidates must match in hue, in size (within what it measured while tracked well) and in the shape
+        # Candidates must match in hue, be about as colourful and bright, in size (within what it measured while tracked well) and in the shape
         # of their edges: as in some view it had while tracked, so turning the object does not matter, and
         # more like it than like the look-alikes that were around. Among them the one that looks most like
         # the object wins: that comparison is relative, so a change of light, which moves all of them alike,
@@ -490,13 +560,21 @@ class ObjectTracker:
             low, high = min(self._heights) / REDETECT_SIZE, max(self._heights) * REDETECT_SIZE
         else:
             low, high = self._ref_height / REDETECT_SIZE, self._ref_height * REDETECT_SIZE
+        hue_limit = REDETECT_HUE
+        if len(self._hues) >= 20:
+            hue_limit = min(REDETECT_HUE, max(REDETECT_HUE_FLOOR, float(np.percentile(self._hues, 95)) + REDETECT_HUE_MARGIN))
+        darkest = min(self._values) / REDETECT_DARKER if len(self._values) >= 10 else 0.0
         views = [self._shape, *self._exemplars]
         scored, turned_down = [], collections.Counter()
         for blob in self.colour.blobs(self.colour.probability(frame)):
             if not low <= blob[3] <= high:
                 turned_down["size"] += 1
-            elif _distance(self._reference, _hue_hist(frame, blob)) >= REDETECT_HUE:
+            elif _distance(self._reference, _hue_hist(frame, blob)) >= hue_limit:
                 turned_down["hue"] += 1
+            elif self._dull(frame, blob):
+                turned_down["dull"] += 1
+            elif _value(frame, blob) < darkest:
+                turned_down["dark"] += 1
             else:
                 shape = _shape_hist(frame, blob)
                 like_object = min(_distance(view, shape) for view in views)
@@ -508,8 +586,9 @@ class ObjectTracker:
                 else:
                     scored.append((_distance(self._look, _look_hist(frame, blob)), blob))
         scored.sort()
-        self.search_info = "%d candidates, turned down: %s, height wanted %.0f-%.0f, %d views, %d impostors" % (
-            len(scored) + sum(turned_down.values()), dict(turned_down) or "none", low, high, len(views), len(self._impostors))
+        self.search_info = "%d candidates, turned down: %s, height wanted %.0f-%.0f, hue below %.2f, %d views, %d impostors" % (
+            len(scored) + sum(turned_down.values()), dict(turned_down) or "none", low, high, hue_limit, len(views),
+            len(self._impostors))
         if not scored:
             self.reason, self._candidate, self._seen = "searching", None, 0
         elif len(scored) > 1 and scored[1][0] - scored[0][0] < REDETECT_MARGIN:
@@ -521,7 +600,7 @@ class ObjectTracker:
             self._candidate = box
             if self._seen >= REDETECT_FRAMES:
                 self._start(frame, box)
-                return Track("tracking", box, 1.0, box[3] / self._ref_height)
+                return Track("tracking", box, 1.0, self._size(box))
             self.reason = "confirming"  # the camera holds still meanwhile
         return Track("lost", reason=self.reason)
 

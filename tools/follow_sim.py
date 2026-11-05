@@ -240,6 +240,16 @@ def main():
     check("camera stands still while a candidate is confirmed", moving.pan_rate != 0 and still.pan_rate == 0 and still.tilt_rate == 0 and still.throttle == 0,
           "scanning pan rate %.2f, confirming %.2f" % (moving.pan_rate, still.pan_rate))
 
+    # Half of the target is suddenly covered: its box halves, so it looks twice as far away. That must not
+    # speed the car up; the throttle may only rise again once the size has been steady for a step.
+    control = FollowControl(PAN_LIMITS, MAX_THROTTLE, TILT_LIMITS)
+    t, throttles = 0.0, []
+    for size in [0.8] * 15 + [0.4] * 3:  # drive slowly toward a target at 0.8 of its size, then the box halves
+        t += FRAME_DT
+        throttles.append(control.update(Track("tracking", (150, 110, 20, 20), 0.9, size), (WIDTH, HEIGHT), 0.1, 90.0, 90.0, t).throttle)
+    check("box halves suddenly: no speed-up", throttles[14] > 0 and throttles[15] <= throttles[14],
+          "throttle %.2f before, %.2f on the jump" % (throttles[14], throttles[15]))
+
     # The target jumps to the side and above the camera's view: only the scan can find it again.
     for label, jump_x, jump_elevation in (("aside and above", 0.9, 30.0), ("aside and below", -0.9, -30.0), ("straight above", 0.0, 32.0)):
         run = Run(lambda t, jx=jump_x: (jx if t > 3 else 0.0, 0.6),
