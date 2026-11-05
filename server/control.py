@@ -37,6 +37,7 @@ class Controller:
         self._follow_gaps = collections.deque(maxlen=400)  # (time, gap in seconds) of follow steps and of page messages
         self._client_gaps = collections.deque(maxlen=1000)
         self.on_follow_end = None  # called with a reason when follow mode ends
+        self.manual_count = 0  # messages that asked for movement, as opposed to the page's idle zeros
         # (arrival time, seconds since the previous message), to spot network stalls
         self._gaps = collections.deque(maxlen=1000)
 
@@ -69,6 +70,8 @@ class Controller:
         if self.following and self.last_client:
             self._client_gaps.append((now, now - self.last_client))
         self.last_client = now
+        if self._manual(msg):
+            self.manual_count += 1
         if self.following:
             if not self._manual(msg):
                 return  # the idle messages of the page must not count as commands
@@ -150,6 +153,19 @@ class Controller:
         self.throttle = 0.0
         self.pan_rate = self.tilt_rate = 0.0
         self.hw.stop()
+
+    async def nod(self, times=3, depth=15.0, half=0.25, delay=0.0):
+        """Nod the camera, to show that the server is up. Stops as soon as anyone else moves the car or camera."""
+        await asyncio.sleep(delay)
+        c = self.hw.cal
+        down = max(c.tilt_min, min(c.tilt_max, 90.0 - depth))
+        started = self.manual_count
+        for tilt in [down, 90.0] * times:
+            if self.following or self.manual_count != started:
+                return
+            self.tilt = tilt
+            self.hw.pan_tilt(self.pan, self.tilt)
+            await asyncio.sleep(half)
 
     def apply_calibration(self):
         """Move the servos to where the current calibration puts the last commanded position."""

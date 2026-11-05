@@ -61,9 +61,13 @@ async def lifespan(app):
     task = asyncio.create_task(app.state.controller.run())
     app.state.shutting_down = False
     log.info("ready")
+    # The server takes requests once this function has yielded: nod right after, so someone standing at the
+    # car sees that the page can be opened.
+    nod = asyncio.create_task(app.state.controller.nod(delay=0.5))
     try:
         yield
     finally:
+        nod.cancel()
         task.cancel()
         app.state.controller.halt("shutdown")
         follower.close()
