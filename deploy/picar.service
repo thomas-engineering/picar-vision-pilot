@@ -6,7 +6,9 @@ After=network.target
 User=__USER__
 WorkingDirectory=__DIR__
 ExecStart=__DIR__/.venv/bin/python -m server.run 8000
-# The server stops the motors on SIGTERM; a crash is restarted, which also stops them.
+# The server stops the motors on SIGTERM. After any end, also a crash or kill -9, switch them off at the
+# PWM chip, which would otherwise keep the last duty until the restarted server is up.
+ExecStopPost=__DIR__/.venv/bin/python -m server.motors_off
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=10
