@@ -1,0 +1,13 @@
+# Steps for a clip of the red disc in front of skin (tools/record_clip.py --steps).
+# Each line: second of the recording at which the step starts, then what to do.
+0   Hold the disc still inside the green box, in front of your neck.
+4   Move the disc slowly: left, right, closer to the camera, farther away. Keep it in the picture.
+9   Cover the disc completely with your other hand. Keep still.
+12  Keep it covered and move hand and disc slowly sideways together.
+15  Take the hand away: the disc is visible again. Hold still.
+17  Hide the disc behind your back.
+19  No disc: neck and face in the picture. Lean closer to the camera, turn your head slowly.
+26  Hold your open hand inside the green box, no disc.
+28  Bring the disc back and hold it still in front of your neck.
+31  Move the disc slowly in front of your neck and face.
+35  Done: hold still until the picture says saved.
