@@ -1,5 +1,5 @@
 [Unit]
-Description=PiCar web control server
+Description=PiCar vision pilot server
 After=network.target
 
 [Service]

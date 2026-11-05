@@ -1,4 +1,4 @@
-# PiCar web control
+# PiCar vision pilot
 
 Python server (FastAPI) on a Raspberry Pi 3B that drives a SunFounder PiCar-V, plus a
 vanilla-JS page in `web/` (no build step, no framework). See README.md for the full picture.

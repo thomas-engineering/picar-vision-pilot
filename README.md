@@ -1,16 +1,22 @@
-# PiCar web control
+# PiCar vision pilot
 
-Drive a SunFounder PiCar-V from a phone, tablet or PC browser: live camera video, two on-screen
-joysticks, keyboard control and a calibration page. A small Python server on the Raspberry Pi talks
-to the car's hardware directly, so the SunFounder software is not needed.
+Browser remote control and object-following for the SunFounder PiCar-V on a Raspberry Pi 3:
+low-latency live video, touch joysticks, and a follow mode that learns an object, tracks it with
+NanoTrack, finds it again after it was hidden, and stops on any doubt. A small Python server on the
+Raspberry Pi talks to the car's hardware directly, so the SunFounder software is not needed.
 
 - Two multi-touch joysticks: drive (steering and throttle) and camera (pan and tilt)
 - Live MJPEG video with an adaptive byte budget, so a weak Wi-Fi link does not delay the controls
 - Responsive page for phone (portrait and landscape), tablet and PC; keyboard control on PC
 - Speed limit, camera resolution switch, invertible axes, connection indicator with round-trip time
 - Calibration page: servo trims and limits, motor minimum and maximum speed, motor direction
-- Follow mode: show the car an object, and it drives after it (see [Follow mode](#follow-mode))
-- Safety: the car stops when commands stop arriving (0.3 s watchdog) and when the page loses focus
+- Follow mode: show the car an object, and it drives after it (see [Follow mode](#follow-mode)); the
+  camera searches for it when it is lost and only takes a candidate that matches in colour, shape,
+  size and brightness, so look-alikes and skin are passed over
+- Safety: the car stops when commands stop arriving (0.3 s watchdog), when the page loses focus and
+  whenever the tracker is unsure; after a crash of the server the motors are switched off at the PWM
+  chip. A reset of the Pi itself still leaves them running (see [Follow mode](#follow-mode))
+- The camera nods three times when the server is up
 
 There is no authentication. Anyone on the network can drive the car, so only run it on a network
 you trust.
@@ -126,6 +132,12 @@ camera-only mode: the camera follows the object, and the car neither steers nor 
 To keep it across reboots, put it in a drop-in, `/etc/systemd/system/picar.service.d/follow-drive.conf`
 (`[Service]` and `Environment=PICAR_FOLLOW_DRIVE=1`), then `sudo systemctl daemon-reload` and restart
 `picar`; delete the file the same way to go back to camera-only.
+
+A reset of the Pi (kernel crash, watchdog, undervoltage) is not covered by the stops above: the
+PCA9685 is powered by the Robot HATS and keeps its last duty, and in a test the wheels kept turning
+for about 55 s until the server was up again. Until a cut-off is fitted (a relay in the motor
+driver's 5V wire, switched by a GPIO with a pull-down), only drive on the floor while someone watches
+and can lift the car.
 
 ### Calibration
 
