@@ -132,7 +132,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 #controls {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  align-items: center;
+  align-items: start;
   justify-items: center;
   gap: 12px;
   padding: 12px var(--gutter) max(16px, env(safe-area-inset-bottom));
@@ -168,6 +168,16 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
   box-shadow: 0 4px 14px #0008;
   pointer-events: none;
   z-index: 1;
+  overflow: hidden;
+}
+.pad-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 48%;
+  height: 48%;
+  opacity: .78;
 }
 .pad.active { border-color: var(--accent); }
 
@@ -198,7 +208,7 @@ input[type=range] {
     position: absolute;
     left: 0; right: 0; bottom: 0;
     padding: 0 max(var(--gutter), env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
-    align-items: end;
+    align-items: start;
     pointer-events: none;
     z-index: 4;
   }

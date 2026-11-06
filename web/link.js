@@ -61,7 +61,7 @@ class Link {
     this.lastTick = now;
     const msg = { ...this.build(), ...this.dirty };
     this.dirty = {};
-    if (now - this.lastPing > 1000) { msg.ping = now; this.lastPing = now; }
+    if (now - this.lastPing > 500) { msg.ping = now; this.lastPing = now; }
     this.ws.send(JSON.stringify(msg));
   }
 

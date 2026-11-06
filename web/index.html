@@ -34,7 +34,13 @@
 
   <section id="controls">
     <div class="pad-wrap">
-      <div class="pad" id="drive"><div class="knob"></div></div>
+      <div class="pad" id="drive"><div class="knob">
+        <svg class="pad-icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/>
+          <path d="M9.5 6.5L12 4l2.5 2.5"/><path d="M9.5 17.5L12 20l2.5-2.5"/>
+          <path d="M6.5 9.5L4 12l2.5 2.5"/><path d="M17.5 9.5L20 12l-2.5 2.5"/>
+        </svg>
+      </div></div>
       <div class="pad-label">Drive &middot; steer / throttle</div>
     </div>
 
@@ -47,7 +53,12 @@
     </div>
 
     <div class="pad-wrap">
-      <div class="pad" id="cam"><div class="knob"></div></div>
+      <div class="pad" id="cam"><div class="knob">
+        <svg class="pad-icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+      </div></div>
       <div class="pad-label">Camera &middot; pan / tilt</div>
       <button id="center_cam" class="padbtn">Centre camera</button>
     </div>
@@ -86,6 +97,7 @@
     <p class="stats" id="stats">no data yet</p>
     <p class="stats">Keyboard: W A S D or arrows to drive, I J K L for the camera, C centres it, space stops. Touching a stick or pressing stop ends follow mode.</p>
     <a href="calibrate.html">Calibration page</a>
+    <a href="wifi.html">Wi-Fi settings</a>
     <a href="#" id="shutdown" class="danger">Shut down the Raspberry Pi</a>
   </div>
 </dialog>
