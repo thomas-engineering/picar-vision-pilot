@@ -1,0 +1,40 @@
+#!/bin/bash
+# Privileged nmcli wrapper for the PiCar server. Called via sudo only.
+# Manages wlan1 (USB dongle); never touches wlan0 (permanent AP).
+set -euo pipefail
+IFACE=wlan1
+NMCLI=/usr/bin/nmcli
+
+_del_wlan1_profiles() {
+    # Delete all 802-11-wireless profiles whose active device is wlan1.
+    # Uses UUID (no colons) so SSID colons cannot corrupt the parse.
+    $NMCLI -t -f UUID,TYPE,DEVICE con show | while IFS=: read uuid type device rest; do
+        if [ "$type" = "802-11-wireless" ] && [ "$device" = "$IFACE" ]; then
+            $NMCLI con delete "$uuid" 2>/dev/null || true
+        fi
+    done
+}
+
+case "${1:-}" in
+    status)
+        $NMCLI -t -f GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS[1] dev show "$IFACE"
+        ;;
+    scan)
+        $NMCLI --escape no -t -f SSID,SIGNAL,SECURITY dev wifi list ifname "$IFACE"
+        ;;
+    connect)
+        ssid="${2:-}"
+        pw="${3:-}"
+        [ -n "$ssid" ] || { echo "SSID required" >&2; exit 1; }
+        _del_wlan1_profiles
+        $NMCLI dev wifi connect "$ssid" password "$pw" ifname "$IFACE"
+        ;;
+    disconnect)
+        $NMCLI dev disconnect "$IFACE" 2>/dev/null || true
+        _del_wlan1_profiles
+        ;;
+    *)
+        echo "usage: picar-wifi-ctl {status|scan|connect SSID PW|disconnect}" >&2
+        exit 1
+        ;;
+esac

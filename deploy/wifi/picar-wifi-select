@@ -1,40 +1,26 @@
 #!/bin/bash
-# Prefer the USB Wi-Fi adapter. While it is connected the onboard radio is switched off;
-# when it is unplugged or loses its connection the onboard radio takes over again.
-# Idempotent: runs from the NetworkManager dispatcher and from a timer.
+# Reconnect the USB Wi-Fi dongle (wlan1) if it is not connected.
+# Called by the NM dispatcher and a 20-second timer.
+# The onboard radio (wlan0) runs as a permanent AP and is not touched here.
 set -u
 exec 9>/run/picar-wifi.lock
 flock -n 9 || exit 0
 
-# First Wi-Fi interface that is (usb) or is not (onboard) attached to the USB bus. Interface names
-# like wlan0 and wlan1 can swap between boots, so the bus is used instead.
 wifi_dev() {
     local d bus
     for d in /sys/class/net/*; do
         [ -d "$d/wireless" ] || [ -d "$d/phy80211" ] || continue
         bus=$(basename "$(readlink -f "$d/device/subsystem" 2>/dev/null)")
-        if [ "$1" = usb ] && [ "$bus" = usb ]; then
-            basename "$d"
-            return
-        elif [ "$1" = onboard ] && [ "$bus" != usb ]; then
-            basename "$d"
-            return
-        fi
+        [ "$bus" = "usb" ] && basename "$d" && return
     done
 }
 
-# NetworkManager device state: 20 unavailable, 30 disconnected, 40-90 connecting, 100 connected
 state() { nmcli -g GENERAL.STATE device show "$1" 2>/dev/null | cut -d' ' -f1; }
 
-onboard=$(wifi_dev onboard)
-[ -n "$onboard" ] || exit 0
-dongle=$(wifi_dev usb)
+dongle=$(wifi_dev)
+[ -n "$dongle" ] || exit 0
 
-if [ -n "$dongle" ] && [ "$(state "$dongle")" = 100 ]; then
-    [ "$(state "$onboard")" = 30 ] || nmcli device disconnect "$onboard"
-else
-    case "$(state "$onboard")" in
-        100|40|50|60|70|80|90) ;;
-        *) nmcli device connect "$onboard" ;;
-    esac
-fi
+case "$(state "$dongle")" in
+    100|40|50|60|70|80|90) ;;
+    *) nmcli device connect "$dongle" 2>/dev/null || true ;;
+esac

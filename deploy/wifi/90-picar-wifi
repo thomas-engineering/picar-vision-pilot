@@ -1,6 +1,31 @@
 #!/bin/sh
-# NetworkManager dispatcher hook: re-evaluate which Wi-Fi radio to use.
-case "$2" in
+# NetworkManager dispatcher hook: manage the USB dongle and the captive portal iptables rule.
+IFACE="$1"
+ACTION="$2"
+
+# Reconnect the USB dongle whenever any interface changes state.
+case "$ACTION" in
     up|down|connectivity-change) setsid /usr/local/sbin/picar-wifi-select >/dev/null 2>&1 & ;;
 esac
+
+# Captive portal: redirect port 80 → 8000 on the AP interface so browsers are caught.
+if [ "$IFACE" = "wlan0" ]; then
+    case "$ACTION" in
+        up)
+            nft list table ip picar-nat >/dev/null 2>&1 || {
+                nft add table ip picar-nat
+                nft add chain ip picar-nat prerouting \
+                    '{ type nat hook prerouting priority -100; policy accept; }'
+            }
+            nft list chain ip picar-nat prerouting 2>/dev/null \
+                | grep -q 'tcp dport 80 redirect to :8000' \
+                || nft add rule ip picar-nat prerouting \
+                    iifname "wlan0" tcp dport 80 redirect to :8000
+            ;;
+        down)
+            nft delete table ip picar-nat 2>/dev/null || true
+            ;;
+    esac
+fi
+
 exit 0

@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 User=__USER__
+EnvironmentFile=-/etc/picar/env
 WorkingDirectory=__DIR__
 ExecStart=__DIR__/.venv/bin/python -m server.run 8000
 # The server stops the motors on SIGTERM. After any end, also a crash or kill -9, switch them off at the

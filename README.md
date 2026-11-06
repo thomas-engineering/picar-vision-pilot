@@ -173,7 +173,7 @@ browser ──WebSocket /ws──► server/app.py ─► server/control.py ─�
 - `server/follow.py`, `follow_control.py`, `follower.py`: the object tracker, the control law that
   turns it into steering, throttle and camera moves, and the glue to the camera and the controller
 - `server/app.py`: HTTP, WebSocket and the static `web/` page
-- `web/`: `index.html` (driving), `calibrate.html`, `app.js`, `link.js` (WebSocket link), `style.css`
+- `web/`: `index.html` (driving), `calibrate.html`, `wifi.html` (Wi-Fi provisioning), `app.js`, `link.js` (WebSocket link), `style.css`
 
 ### WebSocket `/ws`
 
@@ -202,6 +202,10 @@ whenever the camera moves, and `{"type": "follow", ...}` with the follow state w
 | `GET`, `POST /api/calibration` | Read and change calibration values; changes are saved |
 | `GET /api/follow`, `POST /api/follow/learn`, `DELETE /api/follow` | Follow state; learn what is in the reticle; forget it |
 | `POST /api/shutdown` | `{"confirm": true}` stops the car, ignores further commands and powers the Pi off (the page asks the user first). Like the rest of the API it has no authentication |
+| `GET /api/wifi` | `wlan1` status: `connected`, `ssid`, `ip` |
+| `GET /api/wifi/scan` | Visible networks on `wlan1`: list of `{ssid, signal, secured}` |
+| `POST /api/wifi/connect` | `{ssid, wifi_password, settings_password}` — connect `wlan1` to a new network |
+| `POST /api/wifi/disconnect` | `{settings_password}` — disconnect `wlan1` and delete its profile |
 | `GET`, `POST /api/objects`, `POST /api/objects/NAME/load`, `DELETE /api/objects/NAME`, `GET /api/objects/NAME/thumbnail` | Saved objects |
 
 ## Wi-Fi
@@ -212,11 +216,49 @@ the kernel holds back at most 16 KB of unsent data per connection (`TCP_NOTSENT_
 up (`Camera.mjpeg`). A better signal at the car still helps most: a USB extension cable for the
 adapter, or a closer router.
 
-`deploy/wifi/` is optional: it prefers a USB Wi-Fi adapter and switches the onboard radio off while
-the adapter is connected, and back on if the adapter drops. It finds the radios by how they are
-attached (any Wi-Fi interface on USB is the adapter, the other one is the onboard radio), so it
-needs no configuration. Install it with `sudo deploy/wifi/install.sh` on the Pi. It assumes
-NetworkManager and one onboard plus one USB Wi-Fi interface.
+### Two-radio setup
+
+`deploy/wifi/` splits the two radios into fixed roles:
+
+| Radio | Interface | Role |
+|---|---|---|
+| Onboard Broadcom | `wlan0` | Permanent provisioning AP (SSID **PiCar**, open, 192.168.4.1) |
+| USB adapter | `wlan1` | Station — connects to the home or field network |
+
+The onboard radio always broadcasts the provisioning AP, regardless of whether `wlan1` is
+connected. This lets a phone reach the provisioning page even when the target network is unknown or
+out of reach. If `wlan1` is connected, AP clients also get internet through it (NM shared mode NATs
+the traffic).
+
+Install with `sudo ./deploy/wifi/install.sh` on the Pi (run `deploy/install-service.sh` first).
+It assumes NetworkManager and one onboard plus one USB Wi-Fi interface.
+
+### Changing the network (provisioning page)
+
+Connect a phone to the open **PiCar** network and open:
+
+```
+http://picar.local:8000/wifi.html
+http://192.168.4.1:8000/wifi.html
+```
+
+The page shows the current `wlan1` status, lets you scan for networks, and connects `wlan1` to a
+new SSID. Changing the network requires the **Wi-Fi settings password**, which is generated once
+during `install.sh` and stored in `/etc/picar/env` on the Pi. To read it back:
+
+```bash
+ssh picar 'sudo cat /etc/picar/env'
+```
+
+To change it, edit `/etc/picar/env` on the Pi (`PICAR_WIFI_PASSWORD=newpassword`) and restart the
+service (`sudo systemctl restart picar`). The AP itself is open — the password only guards the
+provisioning API.
+
+### Environment variable
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PICAR_WIFI_PASSWORD` | `picar` | Password required to change the Wi-Fi connection via the provisioning page. Set in `/etc/picar/env` by `install.sh` |
 
 ## Tools
 

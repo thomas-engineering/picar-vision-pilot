@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<title>PiCar Wi-Fi</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .net-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+  .net-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+              border-radius: 6px; background: var(--surface2); cursor: pointer; }
+  .net-item:hover, .net-item.selected { background: var(--accent); color: #fff; }
+  .net-signal { font-size: .8em; opacity: .7; margin-left: auto; white-space: nowrap; }
+  .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+                background: var(--muted); flex-shrink: 0; }
+  .status-dot.ok { background: #4caf50; }
+  .choice-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  @media (max-width: 500px) { .choice-cards { grid-template-columns: 1fr; } }
+  .choice-card { background: var(--surface2); border-radius: 10px; padding: 16px;
+                 display: flex; flex-direction: column; gap: 10px; }
+  .choice-card h3 { margin: 0; font-size: 1em; }
+  .choice-card p { margin: 0; font-size: .88em; color: var(--muted); line-height: 1.4; }
+  .url-box { font-size: .9em; font-weight: 600; word-break: break-all;
+             background: var(--surface); padding: 6px 8px; border-radius: 6px; }
+</style>
+</head>
+<body class="page">
+<main>
+  <header>
+    <h1>PiCar Wi-Fi</h1>
+    <a href="index.html"><button>Driving page</button></a>
+  </header>
+
+  <div id="msg"></div>
+
+  <div id="form_view">
+    <div class="cards">
+      <section class="card">
+        <h2>Provisioning AP</h2>
+        <p class="hint" style="margin:0">The Pi always broadcasts an open Wi-Fi network called
+          <strong>PiCar</strong>. Connect to it from any device — this page appears automatically.
+          Driving also works directly from this network once connected below.</p>
+      </section>
+
+      <section class="card">
+        <h2>Internet connection</h2>
+        <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+          <span class="status-dot" id="status_dot"></span>
+          <span id="status_text">Loading…</span>
+        </div>
+        <p class="hint" id="status_ip" style="margin:0;color:var(--muted)"></p>
+      </section>
+
+      <section class="card">
+        <h2>Connect to a network</h2>
+        <div class="field">
+          <div class="head"><span>Network (SSID)</span></div>
+          <div style="display:flex;gap:6px">
+            <input id="ssid" type="text" maxlength="64" placeholder="Network name"
+                   autocomplete="off" autocorrect="off" spellcheck="false" style="flex:1">
+            <button id="scan_btn">Scan</button>
+          </div>
+          <div id="net_list" class="net-list" hidden></div>
+        </div>
+        <div class="field">
+          <div class="head"><span>Wi-Fi password</span></div>
+          <input id="wifi_pw" type="password" maxlength="64"
+                 placeholder="Leave blank for open networks" autocomplete="off">
+        </div>
+        <div class="field">
+          <div class="head"><span>Settings password</span></div>
+          <input id="settings_pw" type="password" maxlength="64"
+                 placeholder="Shown during install" autocomplete="off">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button id="connect_btn" class="primary">Connect</button>
+          <button id="disconnect_btn">Disconnect</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="success_view" hidden>
+    <div class="cards">
+      <section class="card">
+        <h2>&#x2713; Connected to <span id="connected_ssid"></span></h2>
+        <p class="hint" style="margin:0">What would you like to do next?</p>
+        <div class="choice-cards">
+          <div class="choice-card">
+            <h3>Switch to your home Wi-Fi</h3>
+            <p>Go to your phone's Wi-Fi settings, join <strong id="home_ssid"></strong>,
+               then open the car at:</p>
+            <div class="url-box" id="home_url">http://…:8000</div>
+            <p style="font-size:.8em">The PiCar AP stays on — you can come back to it any time.</p>
+          </div>
+          <div class="choice-card">
+            <h3>Drive from this AP</h3>
+            <p>Stay on PiCar and open the driving page directly — no home network needed.</p>
+            <a id="drive_link" href="/" style="display:block;text-align:center;padding:10px 0;
+               border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;
+               font-weight:600">Open driving page</a>
+            <p style="font-size:.8em">If this opened in a sign-in prompt, tap Done first, then
+               open <strong>http://192.168.4.1:8000</strong> in your browser.</p>
+          </div>
+        </div>
+        <button id="back_btn" style="margin-top:8px">Change network</button>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const msg = $("msg");
+function say(text, cls = "") { msg.textContent = text; msg.className = cls; }
+
+async function api(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : r.statusText);
+  return data;
+}
+
+async function loadStatus() {
+  try {
+    const s = await api("GET", "/api/wifi");
+    $("status_dot").className = "status-dot" + (s.connected ? " ok" : "");
+    $("status_text").textContent = s.connected ? ("Connected to " + s.ssid) : "Not connected";
+    $("status_ip").textContent = s.ip ? ("IP: " + s.ip) : "";
+  } catch {
+    $("status_text").textContent = "Could not reach server";
+  }
+}
+
+function showSuccess(s) {
+  $("connected_ssid").textContent = s.ssid || "network";
+  $("home_ssid").textContent = s.ssid || "the network";
+  const homeUrl = s.ip ? "http://" + s.ip + ":8000" : "http://picar.local:8000";
+  $("home_url").textContent = homeUrl;
+  $("drive_link").href = "/";
+  $("form_view").hidden = true;
+  $("success_view").hidden = false;
+  say("");
+}
+
+$("back_btn").onclick = () => {
+  $("success_view").hidden = true;
+  $("form_view").hidden = false;
+  loadStatus();
+};
+
+$("scan_btn").onclick = async () => {
+  $("scan_btn").disabled = true;
+  say("Scanning…");
+  try {
+    const nets = await api("GET", "/api/wifi/scan");
+    const list = $("net_list");
+    list.replaceChildren();
+    if (!nets.length) { say("No networks found"); list.hidden = true; return; }
+    for (const n of nets) {
+      const row = document.createElement("div");
+      row.className = "net-item";
+      const name = document.createElement("span");
+      name.textContent = n.ssid;
+      const sig = document.createElement("span");
+      sig.className = "net-signal";
+      sig.textContent = (n.secured ? "🔒 " : "") + n.signal + "%";
+      row.append(name, sig);
+      row.onclick = () => {
+        $("ssid").value = n.ssid;
+        list.querySelectorAll(".net-item").forEach(el => el.classList.remove("selected"));
+        row.classList.add("selected");
+      };
+      list.append(row);
+    }
+    list.hidden = false;
+    say("");
+  } catch (e) {
+    say("Scan failed: " + e.message, "bad");
+  } finally {
+    $("scan_btn").disabled = false;
+  }
+};
+
+$("connect_btn").onclick = async () => {
+  const ssid = $("ssid").value.trim();
+  if (!ssid) { say("Enter a network name", "bad"); return; }
+  $("connect_btn").disabled = true;
+  say("Connecting…");
+  try {
+    const s = await api("POST", "/api/wifi/connect", {
+      ssid,
+      wifi_password: $("wifi_pw").value,
+      settings_password: $("settings_pw").value,
+    });
+    showSuccess(s);
+  } catch (e) {
+    say(e.message, "bad");
+  } finally {
+    $("connect_btn").disabled = false;
+  }
+};
+
+$("disconnect_btn").onclick = async () => {
+  if (!confirm("Disconnect from the current network?")) return;
+  $("disconnect_btn").disabled = true;
+  say("Disconnecting…");
+  try {
+    await api("POST", "/api/wifi/disconnect", { settings_password: $("settings_pw").value });
+    say("Disconnected", "ok");
+    loadStatus();
+  } catch (e) {
+    say(e.message, "bad");
+  } finally {
+    $("disconnect_btn").disabled = false;
+  }
+};
+
+loadStatus();
+</script>
+</body>
+</html>

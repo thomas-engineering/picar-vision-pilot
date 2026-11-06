@@ -13,17 +13,45 @@ import shlex
 import socket
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Receive, Scope, Send
 from pydantic import BaseModel, Field
 
 from .camera import Camera
 from .control import Controller
 from .follower import Busy, Follower
 from .hardware import Hardware
+from . import wifi as _wifi
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("picar")
+
+# Captive portal: AP clients (192.168.4.x) requesting any external host are redirected to the
+# provisioning page. Known probe paths are let through so their handlers can clear the portal
+# once wlan1 is connected.
+_PORTAL_URL = "http://192.168.4.1:8000/wifi.html"
+_LOCAL_HOSTS = frozenset({"192.168.4.1", "picar.local", "picar1.local", "picar1", "localhost"})
+_PROBE_PATHS = frozenset({
+    "/hotspot-detect.html", "/generate_204", "/connecttest.txt", "/ncsi.txt", "/success.txt",
+})
+
+
+class _CaptivePortal:
+    """Pure ASGI middleware: redirect AP clients with external Host headers to the provisioning page."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            client = scope.get("client")
+            if client and client[0].startswith("192.168.4."):
+                host = dict(scope["headers"]).get(b"host", b"").decode().split(":")[0].lower()
+                if host not in _LOCAL_HOSTS and scope.get("path") not in _PROBE_PATHS:
+                    await RedirectResponse(_PORTAL_URL)(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(ROOT_DIR, "web")
@@ -75,6 +103,7 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(_CaptivePortal)
 
 
 class CameraUpdate(BaseModel):
@@ -87,6 +116,16 @@ class ShutdownRequest(BaseModel):
 
 class ObjectName(BaseModel):
     name: str = Field(min_length=1, max_length=32)
+
+
+class WifiConnect(BaseModel):
+    ssid: str = Field(min_length=1, max_length=64)
+    wifi_password: str = Field(default="", max_length=64)
+    settings_password: str
+
+
+class WifiAction(BaseModel):
+    settings_password: str
 
 
 class CalibrationUpdate(BaseModel):
@@ -106,6 +145,12 @@ class CalibrationUpdate(BaseModel):
     max_speed: int | None = Field(None, ge=0, le=100)
 
 
+def _check_wifi_password(given: str):
+    expected = os.environ.get("PICAR_WIFI_PASSWORD", "picar")
+    if given != expected:
+        raise HTTPException(403, "wrong settings password")
+
+
 def own_ip():
     """The Pi's IPv4 address on its default route (a UDP connect sends nothing), or None."""
     try:
@@ -114,6 +159,37 @@ def own_ip():
             return sock.getsockname()[0]
     except OSError:
         return None
+
+
+# Captive portal probe routes. When wlan1 is connected the expected success response is returned
+# so the OS clears its "sign in" prompt automatically; otherwise a redirect opens the provisioning page.
+
+@app.get("/hotspot-detect.html")  # iOS / macOS
+async def _probe_ios():
+    s = await _wifi.status()
+    if s["connected"]:
+        return Response("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>",
+                        media_type="text/html")
+    return RedirectResponse(_PORTAL_URL)
+
+
+@app.get("/generate_204")  # Android
+async def _probe_android():
+    s = await _wifi.status()
+    return Response(status_code=204) if s["connected"] else RedirectResponse(_PORTAL_URL)
+
+
+@app.get("/connecttest.txt")  # Windows (NCSI)
+@app.get("/ncsi.txt")
+async def _probe_windows():
+    s = await _wifi.status()
+    return Response("Microsoft Connect Test") if s["connected"] else RedirectResponse(_PORTAL_URL)
+
+
+@app.get("/success.txt")  # Firefox
+async def _probe_firefox():
+    s = await _wifi.status()
+    return Response("success\n") if s["connected"] else RedirectResponse(_PORTAL_URL)
 
 
 @app.get("/api/status")
@@ -259,6 +335,32 @@ def set_calibration(update: CalibrationUpdate):
     ctl.hw.cal.save()
     ctl.apply_calibration()
     return dataclasses.asdict(ctl.hw.cal)
+
+
+@app.get("/api/wifi")
+async def get_wifi():
+    return await _wifi.status()
+
+
+@app.get("/api/wifi/scan")
+async def scan_wifi():
+    return await _wifi.scan()
+
+
+@app.post("/api/wifi/connect")
+async def connect_wifi(body: WifiConnect):
+    _check_wifi_password(body.settings_password)
+    ok, msg = await _wifi.connect(body.ssid, body.wifi_password)
+    if not ok:
+        raise HTTPException(422, msg)
+    return await _wifi.status()
+
+
+@app.post("/api/wifi/disconnect")
+async def disconnect_wifi(body: WifiAction):
+    _check_wifi_password(body.settings_password)
+    await _wifi.disconnect()
+    return await _wifi.status()
 
 
 @app.get("/video")
